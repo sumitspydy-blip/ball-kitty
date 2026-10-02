@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ball Kitty</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#f6f7f4;--card:#fff;--ink:#1c2420;--mute:#6b766f;--line:#e2e6e0;--acc:#1f7a4d;--warn:#b7791f;--bad:#c0392b}
+@media(prefers-color-scheme:dark){:root{--bg:#111613;--card:#1a211d;--ink:#e8eee9;--mute:#98a39b;--line:#2a332d;--acc:#4cc38a;--warn:#e0a84a;--bad:#ef6b5b}}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+#app{max-width:560px;margin:0 auto;padding:16px 14px 40px}
+h1{font-size:24px;margin:8px 0 2px}h2{font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin:26px 0 8px}
+.sub,.mute{color:var(--mute);font-size:14px;margin:0}
+.tot{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}
+.tot div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px}
+.tot span{display:block;font-size:12px;color:var(--mute)}.tot b{font-size:20px}
+.row{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:6px}
+.row.warn{border-color:var(--warn)}.row.bad{border-color:var(--bad)}
+.nm{flex:1;min-width:0;overflow-wrap:anywhere}.nm small{display:block;color:var(--mute);font-size:12px}
+.warn .nm small{color:var(--warn)}.bad .nm small{color:var(--bad)}
+.bl{font-weight:700;font-size:18px}.neg{color:var(--bad)}.pos{color:var(--acc)}
+button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:8px 12px;cursor:pointer}
+button.sm{font-size:13px;padding:6px 10px}button.x{padding:4px 9px;color:var(--mute)}
+button.main{width:100%;background:var(--acc);color:#fff;border:0;padding:12px;font-weight:600;margin-top:8px}
+button:disabled{opacity:.45}
+.step{display:flex;align-items:center;gap:10px}.step button{width:40px;height:40px;font-size:20px;padding:0}.step b{min-width:18px;text-align:center}
+input{font:inherit;width:100%;box-sizing:border-box;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);margin-bottom:8px}
+.err{color:var(--bad);font-size:14px;margin:8px 0 0}
+.foot{margin-top:28px;text-align:center}
+</style></head>
+<body><div id="app"><p class="mute">Loading…</p></div>
+<script>
+const KITTY=500,BALL=70,LIMIT=-200;
+let S={players:[],log:[]},draft={},err='',busy=false;
+const ls={g:k=>{try{return localStorage.getItem(k)}catch(e){return null}},s:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}},d:k=>{try{localStorage.removeItem(k)}catch(e){}}};
+const pad=n=>String(n).padStart(2,'0');
+const today=()=>{const d=new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())};
+let date=today();
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const rs=n=>(n<0?'\u2212':'')+'\u20B9'+Math.abs(n);
+const uid=()=>Math.random().toString(36).slice(2,9);
+const balIn=(d,id)=>d.log.filter(e=>e.p===id).reduce((a,e)=>a+e.a,0);
+const bal=id=>balIn(S,id);
+const nameOf=id=>(S.players.find(p=>p.id===id)||{name:'?'}).name;
+const canEdit=()=>!!(ls.g('kt')&&repo());
+
+function repo(){
+  const r=ls.g('kr');if(r)return r;
+  const m=location.hostname.match(/^(.+)\.github\.io$/),p=location.pathname.split('/')[1];
+  return(m&&p)?m[1]+'/'+p:null;
+}
+async function load(){
+  const R=repo(),T=ls.g('kt');
+  if(R){
+    try{
+      const h={Accept:'application/vnd.github.raw+json'};if(T)h.Authorization='Bearer '+T;
+      const r=await fetch('https://api.github.com/repos/'+R+'/contents/data.json?t='+Date.now(),{headers:h,cache:'no-store'});
+      if(r.ok){S=await r.json();return;}
+    }catch(e){}
+  }
+  try{const r=await fetch('data.json?t='+Date.now());S=await r.json();}catch(e){err='Could not load data.';}
+}
+async function mutate(fn){
+  const R=repo(),T=ls.g('kt');
+  if(!R||!T)throw new Error('Editor login needed.');
+  const H={Authorization:'Bearer '+T,Accept:'application/vnd.github+json'};
+  const u='https://api.github.com/repos/'+R+'/contents/data.json';
+  const g=await fetch(u+'?t='+Date.now(),{headers:H,cache:'no-store'});
+  if(!g.ok)throw new Error(g.status===401?'Token invalid or expired.':g.status===404?'Repo or data.json not found, or token has no access.':'GitHub error '+g.status);
+  const j=await g.json();
+  if(Array.isArray(j)||!j.sha)throw new Error('Unexpected reply. Asked: '+u+' Got: '+JSON.stringify(j).slice(0,200));
+  let txt;
+  if(typeof j.content==='string'&&j.content.length&&j.encoding==='base64'){
+    txt=decodeURIComponent(escape(atob(j.content.replace(/\n/g,''))));
+  }else{
+    const rr=await fetch(u+'?t='+Date.now(),{headers:{Authorization:'Bearer '+T,Accept:'application/vnd.github.raw+json'},cache:'no-store'});
+    txt=rr.ok?await rr.text():'';
+  }
+  let cur;
+  try{cur=JSON.parse(txt);}catch(e){cur=null;}
+  if(!cur||!Array.isArray(cur.players)||!Array.isArray(cur.log))cur={players:[],log:[]};
+  fn(cur);
+  const body={message:'Update kitty',content:btoa(unescape(encodeURIComponent(JSON.stringify(cur,null,1)))),sha:j.sha};
+  const p=await fetch(u,{method:'PUT',headers:H,body:JSON.stringify(body)});
+  if(!p.ok)throw new Error(p.status===409?'Someone else saved at the same time. Try again.':(p.status===403||p.status===401||p.status===404)?'Token cannot write. Needs Contents: read and write on this repo.':'Save failed ('+p.status+')');
+  S=cur;
+}
+async function run(fn,after){
+  busy=true;err='';render();
+  try{await mutate(fn);if(after)after();}catch(e){err=e.message||'Error';}
+  busy=false;render();
+}
+
+function render(){
+  const nn=document.getElementById('nn');const nnv=nn?nn.value:'';
+  const ed=canEdit();
+  const bals=S.players.map(p=>({...p,b:bal(p.id)})).sort((a,b)=>a.name.localeCompare(b.name));
+  const col=S.log.filter(e=>e.a>0).reduce((a,e)=>a+e.a,0);
+  const used=-S.log.filter(e=>e.a<0).reduce((a,e)=>a+e.a,0);
+  const balls=S.log.filter(e=>e.k==='ball').reduce((a,e)=>a+e.n,0);
+  const dis=busy?'disabled':'';
+  let h=`<h1>\u{1F3CF} Ball Kitty</h1><p class="sub">${rs(KITTY)} kitty per player \u00B7 ${rs(BALL)} per lost ball</p>`;
+  h+=`<div class="tot"><div><span>Collected</span><b>${rs(col)}</b></div><div><span>Used (${balls} balls)</span><b>${rs(used)}</b></div><div><span>Remaining</span><b>${rs(col-used)}</b></div></div>`;
+  h+='<h2>Players</h2>';
+  if(!bals.length)h+='<p class="mute">No players yet.'+(ed?' Add the first one below.':'')+'</p>';
+  bals.forEach(p=>{
+    const st=p.b<=LIMIT?'bad':p.b<=0?'warn':'';
+    const tag=p.b<=LIMIT?'Top up now':p.b<=0?'Top up due':'';
+    h+=`<div class="row ${st}"><div class="nm">${esc(p.name)}${tag?`<small>${tag}</small>`:''}</div><div class="bl ${p.b<0?'neg':''}">${rs(p.b)}</div>${ed&&p.b<KITTY?`<button class="sm" ${dis} data-a="top" data-id="${p.id}">Top up</button>`:''}</div>`;
+  });
+  if(ed&&bals.length){
+    h+=`<h2>Play day</h2><input type="date" id="dt" value="${date}">`;
+    bals.forEach(p=>{
+      const n=draft[p.id]||0;
+      h+=`<div class="row"><div class="nm">${esc(p.name)}<small>${n?'\u2192 '+rs(p.b-n*BALL):'balls lost'}</small></div><div class="step"><button ${dis} data-a="dec" data-id="${p.id}">\u2212</button><b>${n}</b><button ${dis} data-a="inc" data-id="${p.id}">+</button></div></div>`;
+    });
+    const tb=Object.values(draft).reduce((a,n)=>a+n,0);
+    h+=`<button class="main" ${tb&&!busy?'':'disabled'} data-a="saveday">${busy?'Saving\u2026':`Save day \u00B7 ${tb} ball${tb==1?'':'s'} \u00B7 ${rs(tb*BALL)}`}</button>`;
+  }
+  if(ed)h+=`<h2>Add player</h2><input id="nn" placeholder="Player name" maxlength="30"><button class="main" ${dis} data-a="add" style="margin-top:0">Add player + ${rs(KITTY)} paid</button>`;
+  if(err)h+=`<p class="err">${esc(err)}</p>`;
+  h+='<h2>History</h2>';
+  const L=[...S.log].sort((a,b)=>b.t-a.t).slice(0,40);
+  if(!L.length)h+='<p class="mute">Nothing yet.</p>';
+  L.forEach(e=>{
+    const txt=e.k==='ball'?`${e.n} ball${e.n>1?'s':''} lost`:e.k==='top'?'Top-up':'Joined';
+    h+=`<div class="row"><div class="nm">${esc(nameOf(e.p))}<small>${txt} \u00B7 ${e.d}</small></div><div class="bl ${e.a<0?'neg':'pos'}">${e.a<0?'\u2212':'+'}\u20B9${Math.abs(e.a)}</div>${ed&&e.k!=='join'?`<button class="x" ${dis} data-a="del" data-i="${e.i}">\u2715</button>`:''}</div>`;
+  });
+  h+=`<div class="foot">${ed?'<button class="sm" data-a="logout">Log out of editing</button>':'<button class="sm" data-a="login">Editor login</button>'}</div>`;
+  document.getElementById('app').innerHTML=h;
+  const n2=document.getElementById('nn');if(n2)n2.value=nnv;
+}
+
+document.getElementById('app').addEventListener('click',async ev=>{
+  const b=ev.target.closest('button[data-a]');if(!b||busy)return;
+  const a=b.dataset.a,id=b.dataset.id;err='';
+  if(a==='login'){
+    ls.d('kr');
+    let R=(prompt('GitHub repo (format: username/reponame)',repo()||'')||'').trim().replace(/^https?:\/\/github\.com\//,'').replace(/\/+$/,'');
+    if(!R)return;
+    const T=(prompt('Paste your GitHub access token')||'').trim();if(!T)return;
+    try{
+      const r=await fetch('https://api.github.com/repos/'+R,{headers:{Authorization:'Bearer '+T}});
+      if(!r.ok)throw 0;
+      const j=await r.json();
+      if(j.permissions&&!j.permissions.push)throw 1;
+      ls.s('kr',R);ls.s('kt',T);
+    }catch(e){err=e===1?'That token cannot write to this repo.':'Could not verify token or repo.';}
+    render();return;
+  }
+  if(a==='logout'){ls.d('kt');draft={};render();return;}
+  if(a==='inc'){const n=(draft[id]||0)+1;if(bal(id)-n*BALL<LIMIT)err=nameOf(id)+' would go below '+rs(LIMIT)+'. Top up first.';else draft[id]=n;render();return;}
+  if(a==='dec'){if(draft[id]){draft[id]--;if(!draft[id])delete draft[id];}render();return;}
+  if(a==='add'){
+    const v=document.getElementById('nn').value.trim();
+    if(!v){err='Enter a name.';render();return;}
+    run(d=>{
+      if(d.players.some(p=>p.name.toLowerCase()===v.toLowerCase()))throw new Error('That name already exists.');
+      const pid=uid();d.players.push({id:pid,name:v});
+      d.log.push({i:uid(),t:Date.now(),d:today(),p:pid,k:'join',a:KITTY,n:0});
+    },()=>{const x=document.getElementById('nn');if(x)x.value='';});
+    return;
+  }
+  if(a==='top'){run(d=>{const bl=balIn(d,id);if(bl<KITTY)d.log.push({i:uid(),t:Date.now(),d:today(),p:id,k:'top',a:KITTY-bl,n:0});});return;}
+  if(a==='saveday'){
+    const dd=(document.getElementById('dt')||{}).value||date,dr={...draft};
+    run(d=>{
+      let t=Date.now();
+      Object.keys(dr).forEach(pid=>{
+        if(balIn(d,pid)-dr[pid]*BALL<LIMIT)throw new Error('A player would go below '+rs(LIMIT)+'. Top up first.');
+        d.log.push({i:uid(),t:t++,d:dd,p:pid,k:'ball',a:-dr[pid]*BALL,n:dr[pid]});
+      });
+    },()=>{draft={};});
+    return;
+  }
+  if(a==='del'){if(confirm('Delete this entry?')){const i=b.dataset.i;run(d=>{d.log=d.log.filter(e=>e.i!==i);});}}
+});
+document.getElementById('app').addEventListener('change',ev=>{if(ev.target.id==='dt')date=ev.target.value;});
+load().then(render);
+</script></body></html>
